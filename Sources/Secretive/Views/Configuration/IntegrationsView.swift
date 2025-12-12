@@ -56,7 +56,7 @@ struct IntegrationsDetailView: View {
                 case .otherShell:
                     Form {
                         Section {
-                            Link(.integrationsViewOtherGithubLink, destination: URL(string: "https://github.com/maxgoedjen/secretive-config-instructions/tree/main/shells")!)
+                            Link(.integrationsViewOtherGithubLink, destination: URL(string: "https://github.com.razmser/secretive-config-instructions/tree/main/shells")!)
                         } header: {
                             Text(.integrationsCommunityShellListDescription)
                                 .font(.body)
@@ -67,7 +67,7 @@ struct IntegrationsDetailView: View {
                 case .otherApp:
                     Form {
                         Section {
-                            Link(.integrationsViewOtherGithubLink, destination: URL(string: "https://github.com/maxgoedjen/secretive-config-instructions/tree/main/apps")!)
+                            Link(.integrationsViewOtherGithubLink, destination: URL(string: "https://github.com.razmser/secretive-config-instructions/tree/main/apps")!)
                         } header: {
                             Text(.integrationsCommunityAppsListDescription)
                                 .font(.body)
