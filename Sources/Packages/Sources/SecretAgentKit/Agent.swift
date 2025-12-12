@@ -9,6 +9,7 @@ public final class Agent: Sendable {
 
     private let storeList: SecretStoreList
     private let witness: SigningWitness?
+    private let signingSerializer = SigningSerializer()
     private let publicKeyWriter = OpenSSHPublicKeyWriter()
     private let signatureWriter = OpenSSHSignatureWriter()
     private let certificateHandler = OpenSSHCertificateHandler()
@@ -54,7 +55,7 @@ extension Agent {
             }
         } catch {
             response = SSHAgent.Response.agentFailure.data
-            logger.debug("Agent returned \(SSHAgent.Response.agentFailure.debugDescription)")
+            logger.error("Agent failed to handle \(request.debugDescription, privacy: .public): \(String(describing: error), privacy: .public)")
         }
         return response.lengthAndData
     }
@@ -103,7 +104,15 @@ extension Agent {
 
         try await witness?.speakNowOrForeverHoldYourPeace(forAccessTo: secret, from: store, by: provenance)
 
-        let rawRepresentation = try await store.sign(data: data, with: secret, for: provenance)
+        let hasPersistedAuthentication = await store.existingPersistedAuthenticationContext(secret: secret) != nil
+        let shouldSerialize = secret.authenticationRequirement.required && !hasPersistedAuthentication
+        if shouldSerialize {
+            logger.debug("Serializing signing request for protected key")
+        }
+
+        let rawRepresentation = try await (shouldSerialize ? signingSerializer.withLock {
+            try await store.sign(data: data, with: secret, for: provenance)
+        } : store.sign(data: data, with: secret, for: provenance))
         let signedData = signatureWriter.data(secret: secret, signature: rawRepresentation)
 
         try await witness?.witness(accessTo: secret, from: store, by: provenance)

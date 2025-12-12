@@ -69,6 +69,28 @@ import CryptoKit
             .isValidSignature(signature, for: context.dataToSign))
     }
 
+    @Test func signRequestsAreSerialized() async throws {
+        let request = try SSHAgentInputParser().parse(data: Constants.Requests.requestSignature)
+        let protectedSecret = ProtectedSecret(
+            publicKey: Constants.Secrets.ecdsa256Secret.publicKey,
+            privateKey: Constants.Secrets.ecdsa256Secret.privateKey,
+            authentication: .presenceRequired
+        )
+        let trackingStore = ConcurrencyTrackingStore(secret: protectedSecret, delayNanoseconds: 200_000_000)
+        let storeList = await MainActor.run { () -> SecretStoreList in
+            let list = SecretStoreList()
+            list.add(store: trackingStore)
+            return list
+        }
+
+        let agent = Agent(storeList: storeList)
+        async let first = agent.handle(request: request, provenance: .test)
+        async let second = agent.handle(request: request, provenance: .test)
+        _ = await (first, second)
+
+        #expect(trackingStore.tracker.maxInFlight == 1)
+    }
+
     // MARK: Witness protocol
 
     @Test func witnessObjectionStopsRequest() async throws {
@@ -132,6 +154,82 @@ import CryptoKit
         #expect(response == Constants.Responses.requestFailure)
     }
 
+}
+
+final class ConcurrencyTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var inFlight: Int = 0
+    private(set) var maxInFlight: Int = 0
+
+    func begin() {
+        lock.lock()
+        inFlight += 1
+        maxInFlight = max(maxInFlight, inFlight)
+        lock.unlock()
+    }
+
+    func end() {
+        lock.lock()
+        inFlight -= 1
+        lock.unlock()
+    }
+}
+
+final class ConcurrencyTrackingStore: SecretStore, @unchecked Sendable {
+    typealias SecretType = ProtectedSecret
+
+    @MainActor var isAvailable: Bool { true }
+    let id = UUID()
+    @MainActor var name: String { "ConcurrencyTrackingStore" }
+    let tracker = ConcurrencyTracker()
+
+    private let secret: ProtectedSecret
+    private let delayNanoseconds: UInt64
+
+    init(secret: ProtectedSecret, delayNanoseconds: UInt64) {
+        self.secret = secret
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    @MainActor var secrets: [ProtectedSecret] { [secret] }
+
+    func sign(data: Data, with secret: ProtectedSecret, for provenance: SigningRequestProvenance) async throws -> Data {
+        tracker.begin()
+        defer { tracker.end() }
+
+        try await Task.sleep(nanoseconds: delayNanoseconds)
+
+        let privateKey = try CryptoKit.P256.Signing.PrivateKey(x963Representation: secret.privateKey)
+        return try privateKey.signature(for: data).rawRepresentation
+    }
+
+    func existingPersistedAuthenticationContext(secret: ProtectedSecret) async -> PersistedAuthenticationContext? {
+        nil
+    }
+
+    func persistAuthentication(secret: ProtectedSecret, forDuration duration: TimeInterval) async throws {
+    }
+
+    func reloadSecrets() async {
+    }
+}
+
+struct ProtectedSecret: SecretKit.Secret {
+    let id = Data(UUID().uuidString.utf8)
+    let name = UUID().uuidString
+    let attributes: Attributes
+    let publicKey: Data
+    let privateKey: Data
+
+    init(publicKey: Data, privateKey: Data, authentication: AuthenticationRequirement) {
+        self.attributes = Attributes(
+            keyType: .ecdsa256,
+            authentication: authentication,
+            publicKeyAttribution: "ecdsa-256@example.com"
+        )
+        self.publicKey = publicKey
+        self.privateKey = privateKey
+    }
 }
 
 extension SigningRequestProvenance {
