@@ -4,6 +4,7 @@ import Security
 @unsafe @preconcurrency import CryptoTokenKit
 import LocalAuthentication
 import SecretKit
+import OSLog
 
 extension SmartCard {
     
@@ -20,6 +21,7 @@ extension SmartCard {
     @Observable public final class Store: SecretStore {
 
         private let state = State()
+        private let logger = Logger(subsystem: "com.razmser.secretive.secretagent", category: "SmartCardStore")
         public var isAvailable: Bool {
             state.isAvailable
         }
@@ -72,15 +74,35 @@ extension SmartCard {
             var untyped: CFTypeRef?
             let status = unsafe SecItemCopyMatching(attributes, &untyped)
             if status != errSecSuccess {
+                let message = SecCopyErrorMessageString(status, nil) as String?
+                if let message {
+                    logger.error("SecItemCopyMatching failed status=\(status, privacy: .public) message=\(message, privacy: .public)")
+                } else {
+                    logger.error("SecItemCopyMatching failed status=\(status, privacy: .public)")
+                }
                 throw KeychainError(statusCode: status)
             }
             guard let untypedSafe = untyped else {
+                logger.error("SecItemCopyMatching returned no key reference")
                 throw KeychainError(statusCode: errSecSuccess)
             }
             let key = untypedSafe as! SecKey
             var signError: SecurityError?
-            guard let algorithm = signatureAlgorithm(for: secret) else { throw UnsupportKeyType() }
+            guard let algorithm = signatureAlgorithm(for: secret) else {
+                logger.error("Unsupported key type for SecKeyCreateSignature keyType=\(secret.keyType.description, privacy: .public)")
+                throw UnsupportKeyType()
+            }
             guard let signature = unsafe SecKeyCreateSignature(key, algorithm, data as CFData, &signError) else {
+                if let signError = unsafe signError {
+                    let cfError = unsafe signError.takeUnretainedValue()
+                    let nsError = (cfError as Error) as NSError
+                    logger.error("SecKeyCreateSignature failed origin=\(provenance.origin.displayName, privacy: .public) domain=\(nsError.domain, privacy: .public) code=\(nsError.code, privacy: .public) desc=\(nsError.localizedDescription, privacy: .private)")
+                    if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+                        logger.error("Underlying error domain=\(underlying.domain, privacy: .public) code=\(underlying.code, privacy: .public) desc=\(underlying.localizedDescription, privacy: .private)")
+                    }
+                } else {
+                    logger.error("SecKeyCreateSignature failed with no error object origin=\(provenance.origin.displayName, privacy: .public)")
+                }
                 throw unsafe SigningError(error: signError)
             }
             return signature as Data

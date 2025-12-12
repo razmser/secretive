@@ -55,7 +55,11 @@ extension Agent {
             }
         } catch {
             response = SSHAgent.Response.agentFailure.data
-            logger.error("Agent failed to handle \(request.debugDescription, privacy: .public): \(String(describing: error), privacy: .public)")
+            let nsError = error as NSError
+            logger.error("Agent failed to handle \(request.debugDescription, privacy: .public) domain=\(nsError.domain, privacy: .public) code=\(nsError.code, privacy: .public) desc=\(nsError.localizedDescription, privacy: .private)")
+            if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+                logger.error("Underlying error domain=\(underlying.domain, privacy: .public) code=\(underlying.code, privacy: .public) desc=\(underlying.localizedDescription, privacy: .private)")
+            }
         }
         return response.lengthAndData
     }
