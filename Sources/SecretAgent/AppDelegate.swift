@@ -30,17 +30,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let path = URL.socketPath as String
         return SocketController(path: path)
     }()
-    private let logger = Logger(subsystem: "com.maxgoedjen.secretive.secretagent", category: "AppDelegate")
+    private let logger = Logger(subsystem: "com.razmser.secretive.secretagent", category: "AppDelegate")
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         logger.debug("SecretAgent finished launching")
+        // Use direct parser instead of XPC for local testing
+        let inputParser = SSHAgentInputParser()
+        logger.debug("Socket path: \(URL.socketPath)")
         Task {
-            let inputParser = try await XPCAgentInputParser()
             for await session in socketController.sessions {
+                logger.debug("New session received")
                 Task {
                     do {
                         for await message in session.messages {
-                            let request = try await inputParser.parse(data: message)
+                            let request = try inputParser.parse(data: message)
                             let agentResponse = await agent.handle(request: request, provenance: session.provenance)
                             try session.write(agentResponse)
                         }
